@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 from PIL import Image
 
 #reading and displaying of image
-image = cv2.imread('/content/gdrive/My Drive/croped_num_plate/4T.png')
+image = cv2.imread('4T.png')
 image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB) #converted to rgb to get corrected image even after reading it directly
 plt.imshow(image)
 plt.title('Original Image')
@@ -122,7 +122,7 @@ for index, c in enumerate(Edge_points):
         cv2.putText(image_copy, character, tuple(c), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2, cv2.LINE_AA)
 
 #Displaying corner points
-approx_corners = [Edge_points[i] for i in [0, 2, 1, 3]]
+approx_corners = [Edge_points[i] for i in [0, 1, 2, 3]]
 plt.imshow(image_copy)
 plt.title('Corner Points')
 plt.show()
