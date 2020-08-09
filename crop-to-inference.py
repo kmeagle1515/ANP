@@ -7,6 +7,11 @@ import math
 import imutils
 from tensorflow.keras.models import model_from_json
 from sklearn.preprocessing import LabelEncoder
+import heapq
+import itertools
+import re
+import scipy.fftpack
+
 
 # Calculate distance between 2 points
 def distance(pt1,pt2):
@@ -369,18 +374,93 @@ def Load_ocr_model():
     label_encoder.classes_ = np.load('license_character_classes.npy')
     return model,label_encoder
 
-#Perform ocr and return predicted number plate string
+#Perform ocr and return predicted number plate string 
 def Perform_ocr(crop_characters,model,label_encoder):
-    final_string = ''
-    for i,character in enumerate(crop_characters):
-        character = cv2.resize(character,(80,80))
-        character = np.stack((character,)*3, axis=-1)
-        #joins array sequence about last dimension
-        prediction = label_encoder.inverse_transform([np.argmax(model.predict(character[np.newaxis,:]))])
-        title = np.array2string(prediction)
-        final_string+=title.strip("'[]")
-    return final_string
+  max_prob_list = list()
+  for i,character in enumerate(crop_characters):
+
+    #resize cropped image to 80x80 (fixed input size to model)
+    character = cv2.resize(character,(80,80)) 
+
+    #joins array sequence about last dimension
+    character = np.stack((character,)*3, axis=-1)
+
+    #prediction is a vector, size 36 , of probabilities for each label (total 36 labels --> 10 digits (0-9) and 26 alphabets)
+    prediction = model.predict(character[np.newaxis,:])
     
+    #max_prob_index --> indices of top 3 values (probabilities) from prediction vector
+    max_prob_index = heapq.nlargest(3,range(len(prediction[0])),key = prediction[0].__getitem__)
+    
+    #max_prob_char --> converting index to the corresponding label (character decoding)
+    max_prob_char = label_encoder.inverse_transform(max_prob_index)
+
+    #max_prob_dict --> a dictionary where key is the character and value is probability. 
+    max_prob_dict = {max_prob_char[i]:prediction[0][max_prob_index[i]] for i in range(len(max_prob_char))}
+
+    #max_prob_list --> appending the top 3 character:probility pair for each cropped character
+    max_prob_list.append(max_prob_dict)
+
+  return max_prob_list
+
+#Perform Post Processing and return the top "N" numberplates using the given template
+def Post_processing(max_prob_list):
+  topN_list = list() #list containing top N number plates with confidences
+  #List of Regex Template 
+  template_list = ["^[A-Z]{2}[0-9]{2}[A-Z]{2}[0-9]{4}$","^[A-Z]{2}[0-9]{2}[A-Z]{3}[0-9]{3}$","^[A-Z]{2}[0-9]{2}[A-Z]{2}[0-9]{3}$"]
+  template = '(?:% s)' % '|'.join(template_list) 
+  #List of state code
+  state_code = ['AP','AR','AS','BR','CG','GA','GJ','HR','HP','JH','KA','KL','MP',
+                'MH','MN','ML','MZ','NL','OD','PB','RJ','SK','TN','TR','UP','UK',
+                'UA','WB','TS','AN','CH','DN','DD','JK','LA','LD','DL','PY']
+
+  list_keys = list()
+
+  for x in max_prob_list:
+    #a list of keys to use with itertools module
+    list_keys.append(list(x.keys())) 
+
+  #all possible permutations of a numberplate from the top three probabilities.
+  all_perms = list(itertools.product(*list_keys)) 
+
+  valid_numberplates = {} #dictionary to store valid numberplates and their confidence after template matching
+  for each_perm in all_perms:
+    str1 = ""
+    confidence  = 0
+
+    #converting ("M","H","0","1",...) to "MH01.."
+    str1 = str1.join(each_perm) 
+
+    if re.match(template,str1) is not None and str1[0:2] in state_code: #Pattern matching with the given template
+      for index, x in enumerate(each_perm):
+        confidence += float(max_prob_list[index][x]) #Summing confidence for each character 
+        valid_numberplates[str1] = (confidence,1) # 1 --> Match 
+
+  #Sorting the numberplate based on confidence values
+  valid_numberplates = {k: v for k, v in sorted(valid_numberplates.items(), key=lambda item: item[1][0],reverse= True)} 
+    
+  count = 0 
+  topN = 20 #Setting the number of top matches 
+
+  #Printing the top N matches 
+
+  #sum of all valid confidences (used for softmax)
+  sum_valid_confidences = sum(np.exp(np.ravel([[v[0] for k,v in valid_numberplates.items()]]))) 
+  for key, value in valid_numberplates.items():
+    number_plate = key
+    probability = value[0]
+    pattern = value[1]
+    if count< topN:
+      if pattern == 1 :
+        accuracy = (math.exp(probability))/sum_valid_confidences #taking soft max and converting to percentage
+        accuracy = accuracy*100 
+        topN_list.append({number_plate:accuracy})
+        
+        #print(number_plate+"   "+"Confidence ="+f"{str(round(accuracy,3)): <5}"+"%"+"    "+"Match = True")
+        
+        count += 1
+    else:
+      break
+  return topN_list
 
 # MAIN PROGRAM BEGINS HERE
 
