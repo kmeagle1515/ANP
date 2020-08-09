@@ -111,8 +111,7 @@ for pt in pts:
         d_br = temp_d_br
         bottom_right_pt = pt
 
-#Edge_points = [top_left_pt,top_right_pt,bottom_right_pt,botton_left_pt]
-Edge_points = [top_left_pt,botton_left_pt,bottom_right_pt,top_right_pt]
+Edge_points = [top_left_pt,top_right_pt,bottom_right_pt,botton_left_pt]
 print("Edge Points",Edge_points)
 
 print('\nThe corner points are ...\n')
@@ -122,7 +121,7 @@ for index, c in enumerate(Edge_points):
         cv2.putText(image_copy, character, tuple(c), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2, cv2.LINE_AA)
 
 #Displaying corner points
-approx_corners = [Edge_points[i] for i in [0, 1, 2, 3]]
+approx_corners = Edge_points
 plt.imshow(image_copy)
 plt.title('Corner Points')
 plt.show()
@@ -140,16 +139,10 @@ w = max(int(w1), int(w2))
 #h2 = np.sqrt((Edge_points[1][0] - Edge_points[3][0]) ** 2 + (Edge_points[1][1] - Edge_points[3][1]) ** 2)
 #h = max(int(h1), int(h2))
 
-h1 = np.sqrt((approx_corners[0][0] - approx_corners[2][0]) ** 2 + (approx_corners[0][1] - approx_corners[2][1]) ** 2)
-h2 = np.sqrt((approx_corners[1][0] - approx_corners[3][0]) ** 2 + (approx_corners[1][1] - approx_corners[3][1]) ** 2)
+h1 = np.sqrt((approx_corners[0][0] - approx_corners[3][0]) ** 2 + (approx_corners[0][1] - approx_corners[3][1]) ** 2)
+h2 = np.sqrt((approx_corners[1][0] - approx_corners[2][0]) ** 2 + (approx_corners[1][1] - approx_corners[2][1]) ** 2)
 h = max(int(h1), int(h2))
 
-#setting of destination corner points  
-#destination_corners = np.float32([(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)])#According to document destination points
-
-#destination_corners = np.float32([(w - 1, 0), (0, h - 1), (w - 1, h - 1), (0, 0)]) #need flipping with +1 (output is correct but some part is missing)
-
-#destination_corners = np.float32([(0, h - 1), (w - 1, 0), (w - 1, h - 1), (0, 0)]) #need to rotate image 90degree clockwise (but some images are tilted)   
 
 destination_corners = np.float32([(0, 0), (w - 1, 0), (w - 1, h - 1), (0, h - 1)])#no flipping and rotation require
 
