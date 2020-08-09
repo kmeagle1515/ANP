@@ -18,8 +18,8 @@ all_probs = [{'M': 0.7573969, 'D': 0.09272581, 'N': 0.051710963},
             {'A': 0.9968413, '4': 0.0016599022, 'H': 0.0003524768}]
 
 #Regex Template 
-template = "^[A-Z]{2}[0-9]{2}[A-Z]{2}[0-9]{4}$"
-
+template_list = ["^[A-Z]{2}[0-9]{2}[A-Z]{2}[0-9]{4}$","^[A-Z]{2}[0-9]{2}[A-Z]{3}[0-9]{3}$","^[A-Z]{2}[0-9]{2}[A-Z]{2}[0-9]{3}$"]
+template = '(?:% s)' % '|'.join(template_list) 
 #List of state code
 state_code = ['AP','AR','AS','BR','CG','GA','GJ','HR','HP','JH','KA','KL','MP',
               'MH','MN','ML','MZ','NL','OD','PB','RJ','SK','TN','TR','UP','UK',
@@ -63,6 +63,7 @@ for key, value in conf_final.items():
 
 
 print(f"--- {time.time() - start} seconds ---") #Total time for program (0.05 - 0.08 secs)
+
 
 #OUTPUT
 
