@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 from PIL import Image
 import math
 import imutils
+from tensorflow.keras.models import model_from_json
+from sklearn.preprocessing import LabelEncoder
 
 # Calculate distance between 2 points
 def distance(pt1,pt2):
@@ -96,7 +98,7 @@ def Preprocess_Image(image):
 
 # Removes the border from binary image
 def imclearborder(imgBW, radius):
-    # Given a black and white image, first find all of its contours
+    # Given a binary image, first find all of its contours
     imgBWcopy = imgBW.copy()
     _,contours,hierarchy = cv2.findContours(imgBWcopy.copy(), cv2.RETR_LIST, 
         cv2.CHAIN_APPROX_SIMPLE)
@@ -125,7 +127,7 @@ def imclearborder(imgBW, radius):
             if check1 or check2:
                 contourList.append(idx)
                 break
-
+    #Each contour detected as border is drawn over with black to remove it.
     for idx in contourList:
         cv2.drawContours(imgBWcopy, contours, idx, (0,0,0), -1)
 
@@ -133,16 +135,13 @@ def imclearborder(imgBW, radius):
 
 
 # Detect Lines
-def Multiline_detection(img):
-    h = img.shape[0]
-    w = img.shape[1]
+def Multiline_detection(image):
+    h = image.shape[0]
+    w = image.shape[1]
     
     # resize image for smooth out the image
-    img = cv2.resize(img, (400,int(400*h/w)))
+    image = cv2.resize(image, (400,int(400*h/w)))
 
-    kernel = np.ones((5,5),np.uint8)
-    # change contrast
-    img = 0.5*img + 0.5*cv2.dilate(img,kernel)
 
     # bgcolor detection:
     # List of RGB color sections to check for plate color
@@ -168,10 +167,10 @@ def Multiline_detection(img):
         mask = cv2.inRange(image, lower, upper)
         
         # Sum of all the colums
-        proj = np.sum(mask,axis = 1)
+        sum_of_pixels_in_row = np.sum(mask,axis = 1)
         
         # Max Value in the ROW
-        m = np.max(proj)
+        m = np.max(sum_of_pixels_in_row)
         
 
         # In here we select one row at a time 
@@ -179,14 +178,14 @@ def Multiline_detection(img):
         # and then stor the sum in p_sum 
         # and that sum will later be compared against all colors to choose
         p_sum = 0
-        for row in range(proj.shape[0]):
-            p = int(proj[row]*400/m)
+        for row in range(sum_of_pixels_in_row.shape[0]):
+            p = int(sum_of_pixels_in_row[row]*400/m)
             p_sum+=p
         # append p_sum to v
         sum_of_individual_colors.append(p_sum)
     
     # choose the color which returns max sum
-    bg = color[sum_of_individual_colors.index(max(v))]
+    bg = color[sum_of_individual_colors.index(max(sum_of_individual_colors))]
     
     # Invert the image if the background is dark compared to characters
     if(bg == 'red' or bg == 'green'):
@@ -208,53 +207,64 @@ def Multiline_detection(img):
     w = 500
 
 
-    pts = []
-    # Draw a line for each row
+    sum_over_row = []
+    # for each row..
     for row in range(binary.shape[0]):
+        #normalize sum of pixel values in the row
         p = int(proj[row]*w/m)
         if p<75:
             p=0
         elif p>150:
             p=150
-        pts.append([p,row])
+        #append sum of each row to vector with sum value and row number
+        sum_over_row.append([p,row])
 
     i=0
-    while pts[i][0]!=0:
+    #interate over list of sums until we get row number of horizontal top boundary, i.e we reach first row with 0 white pixels
+    while sum_over_row[i][0]!=0:
         i+=1
+    #crop image vertically until top horzontal boundary is removed
+    sum_over_row = sum_over_row[i:len(sum_over_row)]
 
-    pts = pts[i:len(pts)]
+    transition_points = []
+    #find all the transition points in order to determine boundaries of each individual line in numberplate
+    for i in range(1,len(sum_over_row)):
+        #find transition point from black to white, i.e top of each individual line in numberplate
+        if sum_over_row[i][0]>0 and sum_over_row[i-1][0] == 0:
+            transition_points.append(sum_over_row[i][1])
+        #find transition point from white to bloack, i.e bottom of each individual line in numberplate
+        elif sum_over_row[i][0]==0 and sum_over_row[i-1][0] > 0:
+            transition_points.append(sum_over_row[i-1][1])
 
-    c = []
-    for i in range(1,len(pts)):
-        if pts[i][0]>0 and pts[i-1][0] == 0:
-            c.append(pts[i][1])
-        elif pts[i][0]==0 and pts[i-1][0] > 0:
-            c.append(pts[i-1][1])
-
-    end = len(c)-1
+    end = len(transition_points)-1
 
     # List of Individual lines
-    bc = []
+    individual_lines = []
     for i in range(0,end,2):
-        if c[i+1]-c[i] < 15:
+        #ignore all white transition points/detected numberplate line which have a thickness less than 15
+        #this is done to get rid of unnecessary noise detected as character line
+        if transition_points[i+1]-transition_points[i] < 15:
             #i = i+2
             continue
-        if(i+1 < len(c)):
-            temp=binary[c[i]-10:c[i+1]+10,:]
-            bc.append(imclearborder(temp,1))
+
+        if(i+1 < len(transition_points)):
+            #slicing binary image to get individual numberplate line
+            temp=binary[transition_points[i]-10:transition_points[i+1]+10,:]
+            #removing any additional border from detected individual line and appending to list
+            individual_lines.append(imclearborder(temp,1))
 
     # Returns list of lines in the licence plate
-    return bc
+    return individual_lines
 
 # Character Segmentation on lines
-def Segmentation(bc):
-    t1=[]
+def Segmentation(individual_lines):
+    character_width=[]
     crop_characters = []
     
-    for b in bc:
-        if b.any():
-            bc2 = b
+    for line in individual_lines:
+        if line.any():
             # Create sort_contours() function to grab the contour of each digit from left to right
+            # so as to maintain order of individual characters
             def sort_contours(cnts,reverse = False):
                 i = 0
                 boundingBoxes = [cv2.boundingRect(c) for c in cnts]
@@ -263,32 +273,114 @@ def Segmentation(bc):
                 return cnts
 
 
-            _, cont, _  = cv2.findContours(bc2, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            _, cont, _  = cv2.findContours(line, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-            plate_image = bc2
-            # creat a copy version "test_roi" of plat_image to draw bounding box
-            test_roi = plate_image.copy()
-
-            # Initialize a list which will be used to append charater image
-
-
-            # define standard width and height of character
-            digit_w, digit_h = 30, 60
             for c in sort_contours(cont):
                 (x, y, w, h) = cv2.boundingRect(c)
-                ratio = h/w
-                if True:# Only select contour with defined ratio
-                   # print(h/plate_image.shape[0])
-                    if h/plate_image.shape[0]>=0.55:
-                        t1.append(w)
-                        # Select contour which has the height larger than 50% of the plate
-                        # Sperate number and gibe prediction
-                        curr_num = bc2[y:y+h,x:x+w]
-                        #curr_num = cv2.resize(curr_num, dsize=(digit_w, digit_h))
-                        _, curr_num = cv2.threshold(curr_num, 220, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-                        crop_characters.append(curr_num)
+                #Detected contour is character only if it's height is more than 55% of the individual line height
+                if h/line.shape[0]>=0.55:
+                    character_width.append(w)
+                    #slice line into individual characters
+                    curr_num = line[y:y+h,x:x+w]
+                    _, curr_num = cv2.threshold(curr_num, 220, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+                    crop_characters.append(curr_num)
 
+    return crop_characters,character_width
 
+# Splits segmented character image if multiple characters in single character image
+def Splitting_Characters(crop_characters,character_width):
+    crop_characters_final=[]
+    #if any character is split then list of character width will also have to change
+    updated_character_width=[]
+    #variable is used to find running avg of width of segmented characters
+    avg=character_width[0]
+    for i in range(1,len(character_width)+1):
+        width_ratio = (character_width[i-1]/avg)
+        avg=sum(character_width[0:i])/len(character_width[0:i])
+        
+        #if character width is less than 1.5 of avg width then it is individual character
+        if width_ratio<1.5:
+            crop_characters_final.append(crop_characters[i-1])
+            updated_character_width.append(character_width[i-1])
+        #else we split the image into 2 separate characters at the global minima by using vertical projection
+        else:
+            #sum of values over column ie vertically
+            counts = np.sum(crop_characters[i-1]!=0, axis=0)
+            row_number = [i for i in range(crop_characters[i-1].shape[1])]
+            #convolve the sum to get a smoother projection
+            counts = np.convolve(counts, np.ones(1), mode='same')
+            #find minimas in the projection  
+            minm,_ = scipy.signal.find_peaks(-counts)
+            #find the global minima, i.e the minima point with lowest value
+            m=minm[0]
+            for a in range(1,len(minm)):
+                if counts[m] > counts[minm[a]]:
+                    m=minm[a]
+            #split the character image into 2 at the point of global minima
+            c1 = crop_characters[i-1][:,:m]
+            c2 = crop_characters[i-1][:,m:]
+            crop_characters_final.append(c1)
+            updated_character_width.append(m)
+            crop_characters_final.append(c2)
+            updated_character_width.append(character_width[i-1]-m)
+
+    crop_characters=crop_characters_final
+    character_width=updated_character_width
+    #we perform the same process as above again with all characters in reverse. 
+    #this is done to take care of cases when the first or last segmented character is the one having multiple characters
+    crop_characters.reverse()
+    character_width.reverse()
+    crop_characters_final=[]
+    avg=character_width[0]
+    for i in range(1,len(character_width)+1):
+        v = (character_width[i-1]/avg)
+        avg=sum(character_width[0:i])/len(character_width[0:i])
+        
+        if v<=1.5:
+            crop_characters_final.append(crop_characters[i-1])
+        else:
+            counts = np.sum(crop_characters[i-1]!=0, axis=0)
+            row_number = [i for i in range(crop_characters[i-1].shape[1])]
+            counts = np.convolve(counts, np.ones(1), mode='same')
+            minm,_ = scipy.signal.find_peaks(-counts)
+            m=minm[0]
+            for a in range(1,len(minm)):
+                if counts[m] > counts[minm[a]]:
+                    m=minm[a]
+            c1 = crop_characters[i-1][:,:m]
+            c2 = crop_characters[i-1][:,m:]
+            crop_characters_final.append(c2)
+            crop_characters_final.append(c1)
+    crop_characters=crop_characters_final
+    crop_characters.reverse()
+    character_width.reverse()
+    return crop_characters
+
+#loads model and weights for OCR and returns model and LabelEncoder()
+def Load_ocr_model():
+    # Load model architecture, weight and labels
+    json_file = open('MobileNets_character_recognition.json', 'r')
+    loaded_model_json = json_file.read()
+    json_file.close()
+    model = model_from_json(loaded_model_json)
+    model.load_weights("License_character_recognition_weight.h5")
+
+    label_encoder = LabelEncoder()
+    label_encoder.classes_ = np.load('license_character_classes.npy')
+    return model,label_encoder
+
+#Perform ocr and return predicted number plate string
+def Perform_ocr(crop_characters,model,label_encoder):
+    final_string = ''
+    for i,character in enumerate(crop_characters):
+        character = cv2.resize(character,(80,80))
+        character = np.stack((character,)*3, axis=-1)
+        #joins array sequence about last dimension
+        prediction = label_encoder.inverse_transform([np.argmax(model.predict(character[np.newaxis,:]))])
+        title = np.array2string(prediction)
+        final_string+=title.strip("'[]")
+    return final_string
+    
 
 # MAIN PROGRAM BEGINS HERE
 
