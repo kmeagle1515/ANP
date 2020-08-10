@@ -1,0 +1,5 @@
+classes = 1
+train  = numplate/train.txt
+valid  = numplate/test.txt
+names = numplate/numplate.names
+backup = numplate/backup/
